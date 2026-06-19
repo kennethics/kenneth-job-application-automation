@@ -1,0 +1,728 @@
+{
+  "name": "Kenneth's Job Application Automation v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ⚙️ SETUP CHECKLIST — Fill before activating\n\n**Credentials to add in n8n (Settings → Credentials):**\n- Groq API → console.groq.com (free)\n- Google Sheets OAuth2\n- Google Docs OAuth2\n- Gmail OAuth2\n\n**Placeholders to replace (Ctrl+H in each node):**\n| Placeholder | Where to get it |\n|---|---|\n| `YOUR_RAPIDAPI_KEY` | rapidapi.com → JSearch (free 200/mo) |\n| `YOUR_HUNTER_API_KEY` | hunter.io (free 25/mo) |\n| `YOUR_PHONE_NO_INTL` | e.g. 60123456789 (no + sign) |\n| `YOUR_CALLMEBOT_APIKEY` | See WhatsApp node sticky below |\n| `YOUR_N8N_PUBLIC_URL` | Your Cloudflare Tunnel URL |\n| `YOUR_SPREADSHEET_URL` | Google Sheet full URL |\n| `YOUR_RESUME_FOLDER_ID` | Google Drive folder ID from URL |\n| `YOUR_EMAIL` | Your Gmail address |\n\n**Google Sheet tab name: Applications**\nColumns (row 1): jobId | jobTitle | company | location | salary | jobUrl | source | requirements | description | contactName | contactEmail | emailSubject | emailDraft | status | searchDate | appliedDate | resumeDocUrl | emailSent | skippedDate",
+        "height": 460,
+        "width": 780,
+        "color": 5
+      },
+      "id": "sticky-setup-001",
+      "name": "⚙️ Setup Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-320, -560]
+    },
+    {
+      "parameters": {
+        "content": "## 📱 CallMeBot WhatsApp Setup (Free)\n\n1. Save +34 644 62 49 90 in your contacts as 'CallMeBot'\n2. Send this WhatsApp message to that number:\n   `I allow callmebot to send me messages`\n3. You'll get a reply with your **apikey** — copy it\n4. Replace `YOUR_CALLMEBOT_APIKEY` in nodes below\n5. Replace `YOUR_PHONE_NO_INTL` with your number\n   (e.g. 60123456789 — Malaysia, no + sign)\n\nNote: Approval works via browser links in WA message.",
+        "height": 240,
+        "width": 480,
+        "color": 3
+      },
+      "id": "sticky-callmebot-002",
+      "name": "📱 WhatsApp CallMeBot Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [2120, -340]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 20
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-003",
+      "name": "Daily at 8 PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://jsearch.p.rapidapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "junior AI automation specialist remote OR junior business analyst remote OR customer success entry level remote"
+            },
+            {
+              "name": "num_pages",
+              "value": "3"
+            },
+            {
+              "name": "date_posted",
+              "value": "week"
+            },
+            {
+              "name": "remote_jobs_only",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-RapidAPI-Key",
+              "value": "YOUR_RAPIDAPI_KEY"
+            },
+            {
+              "name": "X-RapidAPI-Host",
+              "value": "jsearch.p.rapidapi.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-jsearch-004",
+      "name": "Search Jobs - JSearch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst jobs = data.data || [];\n\nif (jobs.length === 0) {\n  return [{ json: { error: 'No jobs found from JSearch API. Check your API key and query.' } }];\n}\n\nreturn jobs.slice(0, 10).map(job => ({\n  json: {\n    jobId: job.job_id || String(Date.now() + Math.random()),\n    jobTitle: job.job_title || 'Unknown Title',\n    company: job.employer_name || 'Unknown Company',\n    location: [job.job_city, job.job_state, job.job_country].filter(Boolean).join(', ') || 'Remote',\n    salary: job.job_min_salary\n      ? (job.job_salary_currency || 'USD') + ' ' + job.job_min_salary + '-' + job.job_max_salary + '/yr'\n      : 'Not specified',\n    jobUrl: job.job_apply_link || job.job_google_link || '',\n    source: job.job_publisher || 'JSearch',\n    requirements: (job.job_highlights && job.job_highlights.Qualifications\n      ? job.job_highlights.Qualifications.slice(0, 5).join(' | ')\n      : 'Not specified'),\n    description: (job.job_description || '').substring(0, 600),\n    datePosted: job.job_posted_at_datetime_utc || new Date().toISOString(),\n    companyDomain: (job.employer_website || '')\n      .replace(/https?:\\/\\/(www\\.)?/, '')\n      .split('/')[0] || ''\n  }\n}));"
+      },
+      "id": "node-parse-005",
+      "name": "Parse Job Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "node-split-006",
+      "name": "Split Jobs Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applications",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "jobId": "={{ $json.jobId }}",
+            "jobTitle": "={{ $json.jobTitle }}",
+            "company": "={{ $json.company }}",
+            "location": "={{ $json.location }}",
+            "salary": "={{ $json.salary }}",
+            "jobUrl": "={{ $json.jobUrl }}",
+            "source": "={{ $json.source }}",
+            "requirements": "={{ $json.requirements }}",
+            "description": "={{ $json.description }}",
+            "status": "new",
+            "searchDate": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "node-sheets-append-007",
+      "name": "Save Job to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1040, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Find the best hiring contact at the company: {{ $('Save Job to Sheets').item.json.company }}\n\nCompany domain (if known): {{ $('Parse Job Results').item.json.companyDomain }}\n\nTarget titles (in order of preference): HR Director, HR Manager, Talent Acquisition, Recruiter, Founder, CEO\n\nUse the Hunter.io tool to search for contacts. Try the companyDomain first. If empty, guess the domain from the company name (e.g. 'Acme Corp' -> 'acmecorp.com' or 'acme.com').\n\nReturn ONLY valid JSON (no markdown, no explanation):\n{ \"name\": \"First Last\", \"title\": \"HR Manager\", \"email\": \"email@company.com\", \"confidence\": \"high\" }\n\nIf nothing found, return:\n{ \"name\": \"Hiring Manager\", \"title\": \"\", \"email\": \"\", \"confidence\": \"none\" }",
+        "options": {
+          "systemMessage": "You are a B2B prospecting specialist. Always use the Hunter.io tool to find real contacts. Try multiple domain variations if the first attempt returns nothing. Return ONLY valid JSON — no markdown, no commentary."
+        }
+      },
+      "id": "node-agent-contact-008",
+      "name": "Find HR Contact",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "id": "node-groq-contact-009",
+      "name": "Groq - Contact Finder",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [1180, 540],
+      "credentials": {
+        "groqApi": {
+          "id": "GROQ_CRED_ID",
+          "name": "Groq API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.hunter.io/v2/domain-search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('domain', 'Company domain to search, e.g. google.com') }}"
+            },
+            {
+              "name": "api_key",
+              "value": "YOUR_HUNTER_API_KEY"
+            },
+            {
+              "name": "department",
+              "value": "management"
+            },
+            {
+              "name": "limit",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {},
+        "name": "HunterIO_Search",
+        "description": "Find professional email addresses at a company by domain. Input the company website domain like 'google.com' or 'startup.io'. Returns names, titles, and email addresses of people at that company."
+      },
+      "id": "node-hunter-tool-010",
+      "name": "Hunter.io Email Tool",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [1460, 540]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a cold job application email for Kenneth Kensoriano.\n\nJob details:\n- Role: {{ $('Save Job to Sheets').item.json.jobTitle }}\n- Company: {{ $('Save Job to Sheets').item.json.company }}\n- Key requirements: {{ $('Save Job to Sheets').item.json.requirements }}\n- Job description: {{ $('Save Job to Sheets').item.json.description }}\n\nContact: {{ $('Find HR Contact').item.json.output.name ?? 'Hiring Manager' }}\n\nAbout Kenneth:\n- Based in Malaysia, open to full remote roles globally\n- Skills: AI workflow automation (n8n, Make.com), business analysis, customer success, process optimization\n- Fresh graduate / early career, eager and fast learner\n- LinkedIn: [INSERT YOUR LINKEDIN URL]\n\nInstructions:\n- Subject line: under 60 characters, specific to the role\n- Body: 150-200 words\n- Open with something specific about the company or role (NOT 'I hope this finds you well')\n- Highlight 2-3 matching skills from the requirements\n- End with a clear call to action\n\nReturn ONLY this JSON (no markdown, no extra text):\n{ \"subject\": \"...\", \"body\": \"...\" }",
+        "options": {
+          "systemMessage": "You are an expert job application writer for early-career professionals in Southeast Asia applying to remote global roles. Write authentic, specific, non-generic emails. Never start with clichés. Return ONLY valid JSON."
+        }
+      },
+      "id": "node-agent-email-011",
+      "name": "Draft Application Email",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1580, 300]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "id": "node-groq-email-012",
+      "name": "Groq - Email Drafter",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [1580, 540],
+      "credentials": {
+        "groqApi": {
+          "id": "GROQ_CRED_ID",
+          "name": "Groq API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applications",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "jobId": "={{ $('Save Job to Sheets').item.json.jobId }}",
+            "contactName": "={{ $('Find HR Contact').item.json.output.name ?? 'Hiring Manager' }}",
+            "contactEmail": "={{ $('Find HR Contact').item.json.output.email ?? '' }}",
+            "emailSubject": "={{ $('Draft Application Email').item.json.output.subject }}",
+            "emailDraft": "={{ $('Draft Application Email').item.json.output.body }}",
+            "status": "pending_review"
+          },
+          "matchingColumns": ["jobId"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "node-sheets-draft-013",
+      "name": "Update Sheet - Draft Saved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1860, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-approve-url",
+              "name": "approveUrl",
+              "value": "=https://YOUR_N8N_PUBLIC_URL/webhook-waiting/{{ $execution.id }}?action=approve&jobId={{ $('Save Job to Sheets').item.json.jobId }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-reject-url",
+              "name": "rejectUrl",
+              "value": "=https://YOUR_N8N_PUBLIC_URL/webhook-waiting/{{ $execution.id }}?action=reject&jobId={{ $('Save Job to Sheets').item.json.jobId }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-job-title",
+              "name": "jobTitle",
+              "value": "={{ $('Save Job to Sheets').item.json.jobTitle }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-company",
+              "name": "company",
+              "value": "={{ $('Save Job to Sheets').item.json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-contact",
+              "name": "contactName",
+              "value": "={{ $('Find HR Contact').item.json.output.name ?? 'Hiring Manager' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-contact-email",
+              "name": "contactEmail",
+              "value": "={{ $('Find HR Contact').item.json.output.email ?? 'Not found' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-subject",
+              "name": "emailSubject",
+              "value": "={{ $('Draft Application Email').item.json.output.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-body",
+              "name": "emailBody",
+              "value": "={{ $('Draft Application Email').item.json.output.body }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-salary",
+              "name": "salary",
+              "value": "={{ $('Save Job to Sheets').item.json.salary }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-set-urls-014",
+      "name": "Build Approval Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2140, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.callmebot.com/whatsapp.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "YOUR_PHONE_NO_INTL"
+            },
+            {
+              "name": "text",
+              "value": "=🔔 NEW JOB TO REVIEW\\n\\n*{{ $json.jobTitle }}*\\n🏢 {{ $json.company }}\\n💰 {{ $json.salary }}\\n\\n*Email draft to {{ $json.contactName }}:*\\n📧 {{ $json.contactEmail }}\\n\\nSubject: {{ $json.emailSubject }}\\n\\n{{ $json.emailBody }}\\n\\n---\\n✅ APPROVE → {{ $json.approveUrl }}\\n❌ SKIP → {{ $json.rejectUrl }}\\n\\n(Links expire in 24h)"
+            },
+            {
+              "name": "apikey",
+              "value": "YOUR_CALLMEBOT_APIKEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-wa-notify-015",
+      "name": "Notify via WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 300]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "responseCode": 200,
+          "responseData": "= ✅ Decision received! Check WhatsApp for confirmation."
+        }
+      },
+      "id": "node-wait-016",
+      "name": "Wait for Your Decision",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2700, 300],
+      "webhookId": "kenneth-job-approval-wait"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve-check",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-approve-017",
+      "name": "Did You Approve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2980, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tailor Kenneth Kensoriano's resume for this specific job.\n\nTarget role: {{ $('Save Job to Sheets').item.json.jobTitle }}\nCompany: {{ $('Save Job to Sheets').item.json.company }}\nRequirements: {{ $('Save Job to Sheets').item.json.requirements }}\nJob description: {{ $('Save Job to Sheets').item.json.description }}\n\n--- KENNETH'S BASE RESUME ---\n[PASTE YOUR FULL RESUME TEXT HERE — replace this entire section]\n---\n\nInstructions:\n1. Rewrite the professional summary for this specific role and company\n2. Reorder and reframe bullet points to match job requirements (do NOT invent experience)\n3. Include exact keywords from requirements for ATS optimization\n4. Keep to 1 page equivalent (max 500 words)\n5. Highlight: AI automation skills, analytical mindset, customer-centric thinking\n\nReturn the complete tailored resume as clean plain text only. No markdown, no JSON wrapper.",
+        "options": {
+          "systemMessage": "You are an ATS optimization expert and professional resume writer specializing in fresh graduates and early-career professionals applying to remote roles. Reframe existing experience to match job requirements without fabricating anything. Use keywords exactly as they appear in the job requirements. Return plain text resume only."
+        }
+      },
+      "id": "node-agent-resume-018",
+      "name": "Tailor Resume with AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [3260, 80]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "id": "node-groq-resume-019",
+      "name": "Groq - Resume Tailor",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [3260, 320],
+      "credentials": {
+        "groqApi": {
+          "id": "GROQ_CRED_ID",
+          "name": "Groq API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "folderId": "YOUR_RESUME_FOLDER_ID",
+        "title": "=Resume - {{ $('Save Job to Sheets').item.json.company }} - {{ $('Save Job to Sheets').item.json.jobTitle }} - {{ $now.toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "node-gdocs-020",
+      "name": "Create Resume in Drive",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [3540, 80],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "GOOGLE_DOCS_CRED_ID",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Build Approval Data').item.json.contactEmail || 'YOUR_EMAIL' }}",
+        "subject": "={{ $('Build Approval Data').item.json.emailSubject }}",
+        "emailType": "html",
+        "message": "=<p>{{ $('Build Approval Data').item.json.emailBody.replace(/\\n/g, '<br>') }}</p><br><br><p>---</p><p>I have also prepared a tailored resume for this application. Please find the Google Doc here:<br><a href=\"{{ $('Create Resume in Drive').item.json.webViewLink }}\">View Tailored Resume</a></p><br><br><p>Best regards,<br><strong>Kenneth Kensoriano</strong><br>📧 YOUR_EMAIL<br>🔗 [Your LinkedIn URL]</p>",
+        "options": {
+          "senderName": "Kenneth Kensoriano",
+          "replyTo": "YOUR_EMAIL",
+          "appendAttribution": false
+        }
+      },
+      "id": "node-gmail-021",
+      "name": "Send Application Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [3820, 80],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applications",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "jobId": "={{ $('Save Job to Sheets').item.json.jobId }}",
+            "status": "applied",
+            "appliedDate": "={{ $now.toISO() }}",
+            "resumeDocUrl": "={{ $('Create Resume in Drive').item.json.webViewLink }}",
+            "emailSent": "true"
+          },
+          "matchingColumns": ["jobId"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "node-sheets-applied-022",
+      "name": "Update Sheet - Applied",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [4100, 80],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_URL",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Applications",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "jobId": "={{ $('Save Job to Sheets').item.json.jobId }}",
+            "status": "skipped",
+            "skippedDate": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": ["jobId"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "node-sheets-skipped-023",
+      "name": "Update Sheet - Skipped",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [3260, 540],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.callmebot.com/whatsapp.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "YOUR_PHONE_NO_INTL"
+            },
+            {
+              "name": "text",
+              "value": "=📊 DAILY JOB SUMMARY\\n{{ $now.toFormat('d MMM yyyy') }}\\n\\nYour n8n job bot has finished processing today's job search.\\n\\nCheck your Google Sheet for full details on all jobs found, emails drafted, and applications sent:\\nYOUR_SPREADSHEET_URL\\n\\nHave a great evening! 🌙"
+            },
+            {
+              "name": "apikey",
+              "value": "YOUR_CALLMEBOT_APIKEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-wa-summary-024",
+      "name": "Send Daily Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 560]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily at 8 PM": {
+      "main": [
+        [{"node": "Search Jobs - JSearch", "type": "main", "index": 0}]
+      ]
+    },
+    "Search Jobs - JSearch": {
+      "main": [
+        [{"node": "Parse Job Results", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Job Results": {
+      "main": [
+        [{"node": "Split Jobs Batch", "type": "main", "index": 0}]
+      ]
+    },
+    "Split Jobs Batch": {
+      "main": [
+        [{"node": "Save Job to Sheets", "type": "main", "index": 0}],
+        [{"node": "Send Daily Summary", "type": "main", "index": 0}]
+      ]
+    },
+    "Save Job to Sheets": {
+      "main": [
+        [{"node": "Find HR Contact", "type": "main", "index": 0}]
+      ]
+    },
+    "Groq - Contact Finder": {
+      "ai_languageModel": [
+        [{"node": "Find HR Contact", "type": "ai_languageModel", "index": 0}]
+      ]
+    },
+    "Hunter.io Email Tool": {
+      "ai_tool": [
+        [{"node": "Find HR Contact", "type": "ai_tool", "index": 0}]
+      ]
+    },
+    "Find HR Contact": {
+      "main": [
+        [{"node": "Draft Application Email", "type": "main", "index": 0}]
+      ]
+    },
+    "Groq - Email Drafter": {
+      "ai_languageModel": [
+        [{"node": "Draft Application Email", "type": "ai_languageModel", "index": 0}]
+      ]
+    },
+    "Draft Application Email": {
+      "main": [
+        [{"node": "Update Sheet - Draft Saved", "type": "main", "index": 0}]
+      ]
+    },
+    "Update Sheet - Draft Saved": {
+      "main": [
+        [{"node": "Build Approval Data", "type": "main", "index": 0}]
+      ]
+    },
+    "Build Approval Data": {
+      "main": [
+        [{"node": "Notify via WhatsApp", "type": "main", "index": 0}]
+      ]
+    },
+    "Notify via WhatsApp": {
+      "main": [
+        [{"node": "Wait for Your Decision", "type": "main", "index": 0}]
+      ]
+    },
+    "Wait for Your Decision": {
+      "main": [
+        [{"node": "Did You Approve?", "type": "main", "index": 0}]
+      ]
+    },
+    "Did You Approve?": {
+      "main": [
+        [{"node": "Tailor Resume with AI", "type": "main", "index": 0}],
+        [{"node": "Update Sheet - Skipped", "type": "main", "index": 0}]
+      ]
+    },
+    "Groq - Resume Tailor": {
+      "ai_languageModel": [
+        [{"node": "Tailor Resume with AI", "type": "ai_languageModel", "index": 0}]
+      ]
+    },
+    "Tailor Resume with AI": {
+      "main": [
+        [{"node": "Create Resume in Drive", "type": "main", "index": 0}]
+      ]
+    },
+    "Create Resume in Drive": {
+      "main": [
+        [{"node": "Send Application Email", "type": "main", "index": 0}]
+      ]
+    },
+    "Send Application Email": {
+      "main": [
+        [{"node": "Update Sheet - Applied", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "kenneth-job-app-v2-00001",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "import-me"
+  },
+  "id": "",
+  "tags": []
+}

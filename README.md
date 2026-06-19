@@ -1,4 +1,3 @@
-# kenneth-job-application-automation
 
 # Kenneth's Job Application Automation
 
